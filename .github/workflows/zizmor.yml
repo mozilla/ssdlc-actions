@@ -1,4 +1,8 @@
 name: GitHub Actions Security Analysis with zizmor
+description: |
+  This Github action is required for all public repos running Github actions at Mozilla.
+  It is configured to run with Github advanced security.
+  It is included in a ruleset configured on the Github organization level.
 
 on:
   push:
