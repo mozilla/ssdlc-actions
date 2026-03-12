@@ -1,11 +1,8 @@
-name: GitHub Actions Security Analysis with zizmor for private repos
-description: |
-  This Github action is required for all private repos running Github actions at Mozilla.
-  It is included in a ruleset configured on the Github organization level.
+name: GitHub Actions Security Analysis with zizmor
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "master"]
   pull_request:
     branches: ["**"]
 
@@ -15,8 +12,6 @@ jobs:
   # reference: https://github.com/grafana/security-github-actions/blob/main/.github/workflows/self-zizmor.yaml
   github-actions-check:
     name: Check whether the repo uses Github actions
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     outputs:
       can-run-zizmor: ${{ steps.github-actions-check.outputs.can-run-zizmor }}
@@ -40,8 +35,7 @@ jobs:
   zizmor:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      actions: read
+      security-events: write
     needs:
       - github-actions-check
     if: ${{ needs.github-actions-check.outputs.can-run-zizmor == 'true' }}
@@ -53,10 +47,10 @@ jobs:
           persist-credentials: false
 
       - name: Run zizmor
+        #temporarily using old version until all versions of zizmor are approved under mozilla org
         uses: zizmorcore/zizmor-action@e639db99335bc9038abc0e066dfcd72e23d26fb4 # v0.3.0
         with:
-          advanced-security: false
-          annotations: true
+          advanced-security: true
           min-severity: high
           min-confidence: high
-          fail-on-no-inputs: false
+          #fail-on-no-inputs: false
