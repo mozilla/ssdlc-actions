@@ -1,4 +1,4 @@
-name: GitHub Actions Security Analysis with zizmor for private repos
+name: SSDLC Pipeline Security Analysis
 description: |
   This Github action is required for all private repos running Github actions at Mozilla.
   It is included in a ruleset configured on the Github organization level.
