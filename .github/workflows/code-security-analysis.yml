@@ -1,0 +1,44 @@
+name: SSDLC Code Security Analysis
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["**"]
+
+permissions: {}
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # require for public repos
+      contents: read # require for private repos
+      actions: read # require for private repos
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      # reference: https://github.com/grafana/security-github-actions/blob/main/.github/workflows/self-zizmor.yaml
+      - name: Check for github actions workflow files
+        id: github-actions-check
+        shell: bash
+        run: |
+          CAN_RUN_ZIZMOR=false
+          SEARCH=$(find . -path "**/.github/workflows/*.yml" -o -path "**/.github/workflows/*.yaml" -o -path "**/action.yml" -o -path "**/action.yaml")
+          if [ -n "$SEARCH" ]; then
+              CAN_RUN_ZIZMOR=true
+          fi
+          echo "can-run-zizmor=${CAN_RUN_ZIZMOR}" >> $GITHUB_OUTPUT
+
+      - name: Github actions security analysis using zizmor
+        if: ${{ steps.github-actions-check.outputs.can-run-zizmor == 'true' }}
+        uses: zizmorcore/zizmor-action@71321a20a9ded102f6e9ce5718a2fcec2c4f70d8 # v0.5.2
+        with:
+          advanced-security: ${{ github.event.repository.visibility == 'public' }} # only enable advanced-security for public repos
+          annotations: ${{ github.event.repository.visibility != 'public' }} # only enable annotations for private and internal repos
+          min-severity: high
+          min-confidence: high
+          fail-on-no-inputs: false
