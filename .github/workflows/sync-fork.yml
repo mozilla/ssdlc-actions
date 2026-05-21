@@ -2,7 +2,7 @@
 # Posted by DearVolt
 # Retrieved 2026-05-21, License - CC BY-SA 4.0
 
-name: sync-fork
+name: Sync Fork with Upstream
 on:
   schedule:
     - cron: '0 0 * * 1' # runs weekly on Mondays
