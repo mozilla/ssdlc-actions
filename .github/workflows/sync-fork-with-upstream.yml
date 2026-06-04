@@ -1,0 +1,20 @@
+name: Sync Fork with Upstream
+on:
+  schedule:
+    - cron: '0 0 * * 1' # runs weekly on Mondays
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: |
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$GITHUB_REPOSITORY/merge-upstream" -f 'branch=main'
+        env:
+          GH_TOKEN: ${{ github.token }}
