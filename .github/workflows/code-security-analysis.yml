@@ -1,10 +1,7 @@
 name: SSDLC Code Security Analysis
 
 on:
-  push:
-    branches: ["main", "master"]
-  pull_request:
-    branches: ["**"]
+  workflow_call:
 
 permissions: {}
 
