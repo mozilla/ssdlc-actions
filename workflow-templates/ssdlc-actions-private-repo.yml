@@ -1,0 +1,17 @@
+name: SSDLC Actions
+
+on:
+  push:
+    branches: ["main"] # TODO: update to use the default branch
+  pull_request:
+    branches: ["main"] # TODO: update to use the default branch
+
+permissions: {}
+
+jobs:
+  code-security-analysis:
+    permissions:
+      contents: read
+      actions: read
+    uses: mozilla/ssdlc-actions/.github/workflows/code-security-analysis-private-repo.yml@792c5a3116d0d279cb92f712058eb0176b33e967 # TODO: update to the latest hash
+
