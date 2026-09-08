@@ -1,10 +1,11 @@
 name: SSDLC Code Security Analysis
 description: |
   Workflow file for running code security analysis actions on private and
-  internal repos. Runs zizmor (GitHub Actions security) and Semgrep CE
-  (application source security). Findings surface as workflow annotations on
-  the PR diff and in the job log. The job always passes regardless of findings;
-  blocking is enforced at the org-ruleset / branch-protection layer, not here.
+  internal repos. Runs zizmor (GitHub Actions security), Semgrep CE
+  (application source security) and betterleaks (secrets detection). Findings
+  surface as workflow annotations on the PR diff and in the job log. The job
+  always passes regardless of findings; blocking is enforced at the
+  org-ruleset / branch-protection layer, not here.
 
 on:
   workflow_call:
@@ -82,3 +83,45 @@ jobs:
             --metrics=off \
             --disable-version-check \
             . || true
+
+  betterleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Secrets detection. No GHAS on private repos, so the SARIF report cannot
+      # be published to the Security tab. Instead `verbose: true` prints each
+      # finding's rule, line and path to the job log, with the matched value
+      # shown as REDACTED (`redact: true`) so no secret material is written to
+      # the log. The step does NOT fail the job on findings, matching the
+      # Semgrep job above.
+      #
+      # `report-format: sarif` is still requested even though the report is
+      # never uploaded: the action only derives a leak count from a SARIF
+      # report, and without one its job summary reports "No leaks detected"
+      # regardless of what was found. The file itself is discarded.
+      #
+      # `scan-mode: dir` scans the working tree; the default `auto` selects
+      # git-history mode on push events, which needs `fetch-depth: 0` and would
+      # otherwise scan a single commit on the shallow clone above.
+      #
+      # `validation: false` disables live secret validation, which would
+      # otherwise send candidate secrets from a private repo to third-party
+      # provider APIs to test whether they are active.
+      - name: Secrets scan using betterleaks
+        uses: mozmark/betterleaks-action@bf02f5e117b19e1f872094115a7192d423ec3511 # 20260908-hardening-sketches
+        with:
+          version: v1.8.1
+          scan-mode: dir
+          report-format: sarif
+          report-path: betterleaks.sarif
+          redact: 'true'
+          verbose: 'true'
+          validation: 'false'
+          fail-on-leak: 'false'

@@ -1,6 +1,7 @@
 name: SSDLC Code Security Analysis
 description: |
-  This action runs security analysis tools such as zizmor and semgrep on public repos.
+  This action runs security analysis tools such as zizmor, semgrep and
+  betterleaks (secrets detection) on public repos.
   It relies on Github Advanced Security to upload scan results.
 
 on:
@@ -82,3 +83,45 @@ jobs:
         with:
           sarif_file: semgrep.sarif
           category: semgrep
+
+  betterleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Secrets detection. As with Semgrep, findings are published to the GHAS
+      # Security tab via SARIF and the job does not block on them
+      # (`fail-on-leak: false`); blocking is enforced at the org-ruleset /
+      # branch-protection layer.
+      #
+      # `scan-mode: dir` scans the working tree. The action's default `auto`
+      # selects git-history mode on push events, which needs
+      # `fetch-depth: 0` and would otherwise scan a single commit on the
+      # shallow clone above.
+      #
+      # `validation: false` disables live secret validation, which would
+      # otherwise send candidate secrets to third-party provider APIs to test
+      # whether they are active.
+      - name: Secrets scan using betterleaks
+        uses: mozmark/betterleaks-action@bf02f5e117b19e1f872094115a7192d423ec3511 # 20260908-hardening-sketches
+        with:
+          version: v1.8.1
+          scan-mode: dir
+          report-format: sarif
+          report-path: betterleaks.sarif
+          redact: 'true'
+          validation: 'false'
+          fail-on-leak: 'false'
+
+      - name: Upload betterleaks SARIF to GitHub code scanning
+        if: ${{ always() && hashFiles('betterleaks.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: betterleaks.sarif
+          category: betterleaks
