@@ -8,16 +8,12 @@
 #   4. Scan if a dependency manifest gained lines (even under docs/ or tests/).
 #   5. Skip if every changed file is documentation or tests (renames count
 #      both the old and the new path).
-#   6. Scan if the PR is at least `large_change_threshold` lines.
-#   7. Otherwise skip.
+#   6. Otherwise scan.
 #
 # Glob syntax: `*` matches within a path segment, `**` matches across
 # segments. Patterns without a `/` match the file name in any directory.
 
 version: 1
-
-# Total lines added + deleted in the PR.
-large_change_threshold: 300
 
 # The review and its PR comments only handle this many changed files.
 max_changed_files: 100

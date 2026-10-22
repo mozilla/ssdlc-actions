@@ -108,15 +108,12 @@ def check_files(pr, files, policy):
     skip = policy.get("skip", {})
     ignorable = skip.get("docs_globs", []) + skip.get("test_globs", [])
     # A file moved from code into docs/ or tests/ still counts as code.
-    if all(path_matches(n, ignorable) for f in files for n in _names(f)):
+    code = [f["filename"] for f in files
+            if not all(path_matches(n, ignorable) for n in _names(f))]
+    if not code:
         return False, "skip: only documentation or test files changed"
 
-    threshold = int(policy["large_change_threshold"])
-    changed = pr.get("additions", 0) + pr.get("deletions", 0)
-    if changed >= threshold:
-        return True, f"rule large-change: {changed} lines changed (threshold {threshold})"
-
-    return False, f"skip: no rule matched ({changed} lines changed, threshold {threshold})"
+    return True, f"rule code-change: {_evidence(code)}"
 
 
 # --- GitHub API --------------------------------------------------------------

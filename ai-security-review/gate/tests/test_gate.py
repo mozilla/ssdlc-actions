@@ -19,8 +19,6 @@ BASE_EVENT = {
     "action": "opened",
     "pull_request": {
         "number": 42,
-        "additions": 40,
-        "deletions": 5,
         "changed_files": 3,
         "user": {"login": "a-developer", "type": "User"},
         "head": {"repo": {"full_name": "mozilla/example-service"}},
@@ -92,15 +90,15 @@ def test_skips_bots():
 
 
 def test_drafts_are_scanned():
-    scan, reason = run(event(draft=True, additions=500), [f("app.py", 500)])
-    assert scan and reason.startswith("rule large-change")
+    scan, reason = run(event(draft=True), [f("app.py")])
+    assert scan and reason.startswith("rule code-change")
 
 
 # --- docs / tests only ---------------------------------------------------------
 
 def test_skips_docs_and_tests_only():
     files = [f("docs/guide.md", 400), f("README.md"), f("tests/test_api.py", 200)]
-    scan, reason = run(event(additions=601), files)
+    scan, reason = run(event(), files)
     assert not scan and "documentation or test" in reason
 
 
@@ -110,8 +108,8 @@ def test_skips_empty_file_list():
 
 def test_rename_from_code_into_tests_is_not_tests_only():
     files = [f("tests/session.py", status="renamed", previous_filename="src/auth/session.py")]
-    scan, reason = run(event(additions=400), files)
-    assert scan and reason.startswith("rule large-change")
+    scan, reason = run(event(), files)
+    assert scan and reason.startswith("rule code-change")
 
 
 # --- triggers --------------------------------------------------------------------
@@ -126,23 +124,19 @@ def test_new_dependency_trigger():
     assert scan and reason.startswith("rule new-dependencies")
 
 
-def test_removed_manifest_or_deletions_only_do_not_trigger():
+def test_removed_manifest_or_deletions_only_are_not_new_dependencies():
     files = [f("package.json", 0, 3), f("old/go.mod", 0, 10, status="removed")]
-    assert run(event(), files)[0] is False
+    assert run(event(), files)[1].startswith("rule code-change")
 
 
-def test_lockfile_alone_does_not_trigger():
-    assert run(event(), [f("package-lock.json", 120)])[0] is False
+def test_lockfile_alone_is_not_a_new_dependency():
+    assert run(event(), [f("package-lock.json", 120)])[1] == "rule code-change: package-lock.json"
 
 
-def test_large_change_trigger():
-    scan, reason = run(event(additions=250, deletions=60), [f("app.py", 250, 60)])
-    assert scan and "310 lines changed (threshold 300)" in reason
-
-
-def test_below_threshold_skips():
-    scan, reason = run(event(additions=100, deletions=20), [f("app.py", 100, 20)])
-    assert not scan and "no rule matched" in reason
+def test_any_code_change_is_reviewed():
+    files = [f("README.md", 50), f("src/app.py", 1)]
+    scan, reason = run(event(), files)
+    assert scan and reason == "rule code-change: src/app.py"
 
 
 def test_evidence_is_truncated():
@@ -156,7 +150,7 @@ def test_evidence_is_truncated():
 @pytest.fixture
 def actions_env(tmp_path, monkeypatch):
     event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(event(additions=500, deletions=0)))
+    event_path.write_text(json.dumps(event()))
     output = tmp_path / "output"
     summary = tmp_path / "summary"
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
@@ -175,7 +169,7 @@ def test_main_writes_outputs_and_summary(actions_env, monkeypatch):
     assert gate.main() == 0
     assert output.read_text().splitlines() == [
         "scan=true",
-        "reason=rule large-change: 500 lines changed (threshold 300)",
+        "reason=rule code-change: app.py",
     ]
     assert "AI security review will run" in summary.read_text()
 

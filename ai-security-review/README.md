@@ -26,8 +26,7 @@ The central rules live in [`policy/default.yml`](policy/default.yml). They are a
 3. **Skipped** if an earlier review already posted security comments on the PR. Each PR gets at most one set of findings.
 4. **Review** if lines were added to a dependency manifest (`package.json`, `requirements*.txt`, `go.mod`, …). This applies even under `docs/` or `tests/`.
 5. **Skipped** if the PR only changes documentation or test files. For renames, both the old and new paths count.
-6. **Review** if the PR changes at least 300 lines.
-7. Otherwise **skipped**.
+6. Otherwise **reviewed**.
 
 The job summary always says which rule matched, or why the review was skipped. Repositories can't change these rules. If the gate itself fails (for example, a GitHub API error), the review is skipped and a warning annotation appears on the PR's checks.
 
