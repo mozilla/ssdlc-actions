@@ -1,0 +1,69 @@
+name: SSDLC AI Security Review
+description: |
+  Reusable workflow running an AI security review on pull requests. A gate
+  first applies the rules in ai-security-review/policy/default.yml and only then runs the
+  Mozilla fork of anthropics/claude-code-security-review, which posts findings
+  as inline PR review comments. The workflow never fails on findings; blocking
+  belongs at the org-ruleset / branch-protection layer, not here.
+
+on:
+  workflow_call:
+    inputs:
+      claude-model:
+        description: Claude model used for the review and the false-positive filter.
+        type: string
+        required: false
+        default: claude-opus-5-5
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: Anthropic API key (POC only; to be replaced by Workload Identity Federation).
+        required: true
+
+permissions: {}
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # list the PR's files and comments, post the "too big" comment
+    outputs:
+      scan: ${{ steps.gate.outputs.scan }}
+    steps:
+      - name: Decide whether to run an AI scan
+        id: gate
+        # Branch ref for testing; pin to a SHA once the POC works.
+        uses: mozilla/ssdlc-actions/ai-security-review/gate@test-ai-scanning # zizmor: ignore[unpinned-uses]
+
+  review:
+    name: Claude security review
+    needs: gate
+    if: needs.gate.outputs.scan == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # One review per PR at a time. A running review always finishes; newer pushes
+    # wait, and only the latest waiting one runs (GitHub keeps one pending job).
+    concurrency:
+      group: ai-security-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write # inline review comments
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Claude Code security review
+        # Branch ref for testing; pin to a SHA once the POC works.
+        uses: mozilla/claude-code-security-review@main # zizmor: ignore[unpinned-uses]
+        with:
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude-model: ${{ inputs.claude-model }}
+          comment-pr: "true"
+          # The gate decides when to scan; the action's own once-per-PR cache can
+          # skip new commits (anthropics/claude-code-security-review#120).
+          run-every-commit: "true"
