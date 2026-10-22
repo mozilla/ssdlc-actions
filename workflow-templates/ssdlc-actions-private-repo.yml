@@ -13,5 +13,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: write # AI security review comments
     uses: mozilla/ssdlc-actions/.github/workflows/code-security-analysis-private-repo.yml@792c5a3116d0d279cb92f712058eb0176b33e967 # TODO: update to the latest hash
-
+    secrets:
+      # Optional: enables the AI security review when Semgrep finds something on the PR.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

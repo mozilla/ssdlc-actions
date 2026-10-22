@@ -3,11 +3,26 @@ description: |
   Workflow file for running code security analysis actions on private and
   internal repos. Runs zizmor (GitHub Actions security) and Semgrep CE
   (application source security). Findings surface as workflow annotations on
-  the PR diff and in the job log. The job always passes regardless of findings;
-  blocking is enforced at the org-ruleset / branch-protection layer, not here.
+  the PR diff and in the job log. On pull requests Semgrep only reports the
+  findings the pull request introduces; if there are any, an AI security review
+  of the pull request follows, with those findings passed to Claude as leads.
+  The job always passes regardless of findings; blocking is enforced at the
+  org-ruleset / branch-protection layer, not here.
 
 on:
   workflow_call:
+    inputs:
+      claude-model:
+        description: Claude model used for the AI security review.
+        type: string
+        required: false
+        default: claude-opus-5-5
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: |
+          Anthropic API key for the AI security review (POC only; to be replaced
+          by Workload Identity Federation). Without it the review is skipped.
+        required: false
 
 permissions: {}
 
@@ -50,12 +65,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      sha: ${{ steps.scanned.outputs.sha }}
+      pr-findings: ${{ steps.pr-findings.outputs.count }}
+      findings: ${{ steps.pr-findings.outputs.findings }}
+    env:
+      # Secrets are not available in `if:` conditions. Empty for callers that
+      # don't pass the key, fork PRs and Dependabot PRs.
+      AI_REVIEW_KEY_SET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
 
     steps:
+      # On pull requests, scan the PR head: the commit the AI review reads and
+      # comments on, so Semgrep's line numbers apply there unchanged. The full
+      # history is needed for the merge base Semgrep compares against.
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
           persist-credentials: false
+
+      - name: Record the scanned commit
+        id: scanned
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -72,13 +104,121 @@ jobs:
       # layer where Security can manage exemptions, not inside the workflow.
       # `|| true` guarantees the step exits 0 even if Semgrep exits non-zero
       # on findings (default behavior with `--severity ERROR`).
+      # On pull requests, `--baseline-commit` limits the results to findings
+      # the PR introduces compared with its merge base; pushes get a full scan.
       - name: Run Semgrep
+        id: semgrep-scan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          baseline=()
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if merge_base=$(git merge-base HEAD "$BASE_SHA"); then
+              baseline=(--baseline-commit "$merge_base")
+              echo "baseline=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning title=Semgrep baseline unavailable::No merge base with $BASE_SHA; running a full scan"
+            fi
+          fi
           semgrep scan \
             --config p/owasp-top-ten \
             --config p/secrets \
             --config p/security-audit \
             --severity ERROR \
+            --sarif-output="$RUNNER_TEMP/semgrep.sarif" \
             --metrics=off \
             --disable-version-check \
+            "${baseline[@]}" \
             . || true
+
+      # Turns the PR's findings into leads for the AI review. Only after a
+      # baseline scan: a full scan would also report existing findings.
+      - name: Collect the pull request's Semgrep findings
+        id: pr-findings
+        if: ${{ steps.semgrep-scan.outputs.baseline == 'true' && env.AI_REVIEW_KEY_SET == 'true' }}
+        run: |
+          python - <<'EOF'
+          import json, os
+
+          # A failed Semgrep run writes no (or a broken) SARIF file; that must not
+          # fail the job. No results means no AI review.
+          try:
+              with open(os.path.join(os.environ["RUNNER_TEMP"], "semgrep.sarif"), encoding="utf-8") as f:
+                  runs = json.load(f).get("runs", [])
+          except (OSError, ValueError) as e:
+              print(f"::warning title=Semgrep results unavailable::{e}")
+              runs = []
+
+          # The message can contain PR code (Semgrep metavariables); snippets are
+          # left out, Claude reads the code itself.
+          findings = []
+          for run in runs:
+              # Semgrep sets the level on the rule, not on each result.
+              rule_levels = {
+                  rule.get("id"): rule.get("defaultConfiguration", {}).get("level", "")
+                  for rule in run.get("tool", {}).get("driver", {}).get("rules", [])
+              }
+              for result in run.get("results", []):
+                  location = (result.get("locations") or [{}])[0].get("physicalLocation", {})
+                  region = location.get("region", {})
+                  start = region.get("startLine", 0)
+                  findings.append({
+                      "tool": "semgrep",
+                      "rule_id": result.get("ruleId", ""),
+                      "severity": result.get("level") or rule_levels.get(result.get("ruleId"), ""),
+                      "path": location.get("artifactLocation", {}).get("uri", "").removeprefix("./"),
+                      "start_line": start,
+                      "end_line": region.get("endLine", start),
+                      "message": result.get("message", {}).get("text", "")[:500],
+                  })
+
+          count = len(findings)
+          leads = {"findings": findings[:50], "omitted": max(0, count - 50)}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"count={count}\n")
+              out.write(f"findings={json.dumps(leads)}\n")
+          print(f"{count} Semgrep finding(s) introduced by this pull request")
+          EOF
+
+  # AI security review of the pull request, only when Semgrep found something
+  # the pull request introduces. Never fails the workflow.
+  ai-security-review:
+    name: AI security review
+    needs: semgrep
+    if: ${{ fromJSON(needs.semgrep.outputs.pr-findings || '0') > 0 }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # One review per PR at a time. A running review always finishes; newer pushes
+    # wait, and only the latest waiting one runs (GitHub keeps one pending job).
+    concurrency:
+      group: ai-security-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write # inline review comments
+
+    steps:
+      # Exactly the commit Semgrep scanned, so the leads' line numbers match.
+      - name: Checkout the commit Semgrep scanned
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.semgrep.outputs.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Write Semgrep findings for the review
+        env:
+          FINDINGS: ${{ needs.semgrep.outputs.findings }}
+        run: printf '%s' "$FINDINGS" > "$RUNNER_TEMP/semgrep-findings.json"
+
+      - name: Claude Code security review
+        # Branch ref for testing; pin to a SHA once the POC works.
+        uses: mozilla/claude-code-security-review@semgrep-test # zizmor: ignore[unpinned-uses]
+        with:
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude-model: ${{ inputs.claude-model }}
+          static-analysis-findings-file: ${{ runner.temp }}/semgrep-findings.json
+          comment-pr: "true"
+          # Semgrep decides when to scan; the action's own once-per-PR cache can
+          # skip new commits (anthropics/claude-code-security-review#120).
+          run-every-commit: "true"
