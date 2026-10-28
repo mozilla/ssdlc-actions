@@ -216,8 +216,8 @@ def main():
             if too_big(pr, policy):
                 comment_too_big(api, repo, pr, max_files, token)
                 decision = False, f"skip: too big ({pr['changed_files']} files changed, limit {max_files})"
-            elif has_security_comment(api, repo, pr["number"], token):
-                decision = False, "skip: an earlier review already posted security comments"
+            #elif has_security_comment(api, repo, pr["number"], token):
+            #    decision = False, "skip: an earlier review already posted security comments"
             else:
                 files = fetch_pr_files(api, repo, pr["number"], token)
                 decision = check_files(pr, files, policy)
