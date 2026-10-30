@@ -1,0 +1,59 @@
+# Central rules deciding when the AI security review runs on a pull request.
+#
+# Evaluated by ai-security-review/gate/gate.py. Order of evaluation:
+#   1. Hard skips: non-PR events, fork PRs, bot authors.
+#   2. Skip PRs changing more than `max_changed_files` files, with a one-time
+#      PR comment asking for a separate review.
+#   3. Skip if an earlier review already posted security comments on the PR.
+#   4. Scan if a dependency manifest gained lines (even under docs/ or tests/).
+#   5. Skip if every changed file is documentation or tests (renames count
+#      both the old and the new path).
+#   6. Otherwise scan.
+#
+# Glob syntax: `*` matches within a path segment, `**` matches across
+# segments. Patterns without a `/` match the file name in any directory.
+
+version: 1
+
+# The review and its PR comments only handle this many changed files.
+max_changed_files: 100
+
+skip:
+  bot_authors: true # GitHub user type "Bot", e.g. dependabot[bot]
+  docs_globs:
+    - "docs/**"
+    - "*.md"
+    - "*.rst"
+    - "*.adoc"
+    - "LICENSE*"
+    - "CHANGELOG*"
+  test_globs:
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/__tests__/**"
+    - "test_*.py"
+    - "*_test.py"
+    - "*_test.go"
+    - "*.test.js"
+    - "*.test.ts"
+    - "*.test.tsx"
+    - "*.spec.js"
+    - "*.spec.ts"
+    - "*.spec.tsx"
+
+# A change adding lines to one of these files counts as adding dependencies.
+# Lock files are deliberately not listed: they change on every version bump.
+dependency_manifests:
+  - "package.json"
+  - "requirements*.txt"
+  - "pyproject.toml"
+  - "setup.py"
+  - "setup.cfg"
+  - "Pipfile"
+  - "go.mod"
+  - "Cargo.toml"
+  - "Gemfile"
+  - "pom.xml"
+  - "build.gradle"
+  - "build.gradle.kts"
+  - "composer.json"

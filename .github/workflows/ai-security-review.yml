@@ -1,0 +1,85 @@
+name: SSDLC AI Security Review
+description: |
+  Reusable workflow running an AI security review on pull requests. A gate
+  first applies the rules in ai-security-review/policy/default.yml and only then runs the
+  Mozilla fork of anthropics/claude-code-security-review, which posts findings
+  as inline PR review comments. The workflow never fails on findings; blocking
+  belongs at the org-ruleset / branch-protection layer, not here.
+
+on:
+  workflow_call:
+    inputs:
+      claude-model:
+        description: Claude model used for the review and the false-positive filter.
+        type: string
+        required: false
+        default: claude-opus-5-5
+
+permissions: {}
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # list the PR's files and comments, post the "too big" comment
+    outputs:
+      scan: ${{ steps.gate.outputs.scan }}
+    steps:
+      - name: Decide whether to run an AI scan
+        id: gate
+        # Branch ref for testing; pin to a SHA once the POC works.
+        uses: mozilla/ssdlc-actions/ai-security-review/gate@test-ai-scanning # zizmor: ignore[unpinned-uses]
+
+  review:
+    name: Claude security review
+    needs: gate
+    if: needs.gate.outputs.scan == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # One review per PR at a time. A running review always finishes; newer pushes
+    # wait, and only the latest waiting one runs (GitHub keeps one pending job).
+    concurrency:
+      group: ai-security-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # request the OIDC token for Anthropic Workload Identity Federation
+      pull-requests: write # inline review comments
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      # Keyless auth: Anthropic Workload Identity Federation. The federation rule
+      # trusts this workflow's job_workflow_ref, so the token proves this workflow ran.
+      # The SDK and CLI exchange the GitHub OIDC token for a short-lived Anthropic one.
+      - name: Fetch GitHub OIDC token for Anthropic
+        run: |
+          set -euo pipefail
+          umask 077
+          jwt=$(curl -sS --fail -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | jq -r .value)
+          echo "::add-mask::$jwt"
+          printf '%s' "$jwt" > "$RUNNER_TEMP/anthropic-oidc-jwt"
+
+      - name: Claude Code security review
+        # Branch ref for testing; pin to a SHA once the POC works.
+        uses: mozilla/claude-code-security-review@test-wif # zizmor: ignore[unpinned-uses]
+        env:
+          # These IDs are not sensitive, so they are Actions variables, not secrets:
+          # Anthropic documents them as non-secret, and the federation rule gates access.
+          ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+          ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/anthropic-oidc-jwt
+        with:
+          claude-model: ${{ inputs.claude-model }}
+          comment-pr: "true"
+          # The gate decides when to scan; the action's own once-per-PR cache can
+          # skip new commits (anthropics/claude-code-security-review#120).
+          run-every-commit: "true"
