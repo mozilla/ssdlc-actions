@@ -14,10 +14,6 @@ on:
         type: string
         required: false
         default: claude-opus-5-5
-    secrets:
-      ANTHROPIC_API_KEY:
-        description: Anthropic API key (POC only; to be replaced by Workload Identity Federation).
-        required: true
 
 permissions: {}
 
@@ -48,7 +44,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write # TEMP: OIDC claims probe, remove with the step below
+      id-token: write # request the OIDC token for Anthropic Workload Identity Federation
       pull-requests: write # inline review comments
     steps:
       - name: Checkout pull request head
@@ -58,33 +54,30 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
-      # TEMP: print the OIDC claims this job would present to Anthropic WIF, to
-      # pick the federation rule's match values. Prints the decoded payload only,
-      # never the token. Remove once the rule is settled.
-      - name: Probe OIDC claims
+      # Keyless auth: Anthropic Workload Identity Federation. The federation rule
+      # trusts this workflow's job_workflow_ref, so the token proves this workflow ran.
+      # The SDK and CLI exchange the GitHub OIDC token for a short-lived Anthropic one.
+      - name: Fetch GitHub OIDC token for Anthropic
         run: |
           set -euo pipefail
-          # ACTIONS_ID_TOKEN_REQUEST_* are runner variables, present in the shell
-          # only when the job has id-token: write.
-          jwt=$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          umask 077
+          jwt=$(curl -sS --fail -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | jq -r .value)
           echo "::add-mask::$jwt"
-          python3 - "$jwt" <<'PY'
-          import base64, json, sys
-          payload = sys.argv[1].split(".")[1]
-          payload += "=" * (-len(payload) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(payload))
-          keys = ("iss", "aud", "sub", "repository", "repository_owner", "ref",
-                  "event_name", "workflow_ref", "workflow_sha",
-                  "job_workflow_ref", "job_workflow_sha", "runner_environment")
-          print(json.dumps({k: claims.get(k) for k in keys}, indent=2))
-          PY
+          printf '%s' "$jwt" > "$RUNNER_TEMP/anthropic-oidc-jwt"
 
       - name: Claude Code security review
         # Branch ref for testing; pin to a SHA once the POC works.
-        uses: mozilla/claude-code-security-review@main # zizmor: ignore[unpinned-uses]
+        uses: mozilla/claude-code-security-review@test-wif # zizmor: ignore[unpinned-uses]
+        env:
+          # These IDs are not sensitive, so they are Actions variables, not secrets:
+          # Anthropic documents them as non-secret, and the federation rule gates access.
+          ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+          ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/anthropic-oidc-jwt
         with:
-          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude-model: ${{ inputs.claude-model }}
           comment-pr: "true"
           # The gate decides when to scan; the action's own once-per-PR cache can
