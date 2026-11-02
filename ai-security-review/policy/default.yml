@@ -1,14 +1,14 @@
 # Central rules deciding when the AI security review runs on a pull request.
 #
 # Evaluated by ai-security-review/gate/gate.py. Order of evaluation:
-#   1. Hard skips: non-PR events, fork PRs, bot authors.
+#   1. Hard skips: non-PR events, labels other than `rescan_label`, fork PRs,
+#      PRs labelled `skip.opt_out_label`, bot authors.
 #   2. Skip PRs changing more than `max_changed_files` files, with a one-time
 #      PR comment asking for a separate review.
-#   3. Skip if an earlier review already posted security comments on the PR.
-#   4. Scan if a dependency manifest gained lines (even under docs/ or tests/).
-#   5. Skip if every changed file is documentation or tests (renames count
+#   3. Scan if a dependency manifest gained lines (even under docs/ or tests/).
+#   4. Skip if every changed file is documentation or tests (renames count
 #      both the old and the new path).
-#   6. Otherwise scan.
+#   5. Otherwise scan.
 #
 # Glob syntax: `*` matches within a path segment, `**` matches across
 # segments. Patterns without a `/` match the file name in any directory.
@@ -18,7 +18,12 @@ version: 1
 # The review and its PR comments only handle this many changed files.
 max_changed_files: 100
 
+# Adding this label to a PR runs the gate (and so the review) again. The file
+# rules below still apply. The gate removes the label so it can be re-applied.
+rescan_label: ai-review
+
 skip:
+  opt_out_label: skip-ai-review # a PR with this label is never reviewed
   bot_authors: true # GitHub user type "Bot", e.g. dependabot[bot]
   docs_globs:
     - "docs/**"

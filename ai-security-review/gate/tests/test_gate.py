@@ -89,6 +89,28 @@ def test_skips_bots():
     assert not scan and "dependabot[bot]" in reason
 
 
+def test_skips_opt_out_label():
+    e = event(labels=[{"name": "bug"}, {"name": "skip-ai-review"}])
+    scan, reason = run(e, [f("app.py", 500)])
+    assert not scan and "skip-ai-review" in reason
+
+
+def test_other_labels_do_not_opt_out():
+    assert run(event(labels=[{"name": "bug"}]), [f("app.py")])[0] is True
+
+
+def test_opt_out_label_wins_over_rescan_label(actions_env, monkeypatch):
+    e = labeled_event("ai-review", labels=[{"name": "ai-review"}, {"name": "skip-ai-review"}])
+    _write_event(e)
+
+    def must_not_call(*a, **kw):
+        raise AssertionError("API called for an opted-out PR")
+
+    monkeypatch.setattr(gate, "_request", must_not_call)
+    gate.main()
+    assert "skip-ai-review label" in actions_env[0].read_text()
+
+
 def test_drafts_are_scanned():
     scan, reason = run(event(draft=True), [f("app.py")])
     assert scan and reason.startswith("rule code-change")
@@ -164,7 +186,6 @@ def actions_env(tmp_path, monkeypatch):
 
 def test_main_writes_outputs_and_summary(actions_env, monkeypatch):
     output, summary = actions_env
-    monkeypatch.setattr(gate, "has_security_comment", lambda *a: False)
     monkeypatch.setattr(gate, "fetch_pr_files", lambda *a: [f("app.py", 500)])
     assert gate.main() == 0
     assert output.read_text().splitlines() == [
@@ -182,7 +203,6 @@ def test_main_skips_api_calls_for_payload_decisions(actions_env, monkeypatch):
         raise AssertionError("API called for a payload-only decision")
 
     monkeypatch.setattr(gate, "fetch_pr_files", must_not_call)
-    monkeypatch.setattr(gate, "has_security_comment", must_not_call)
     gate.main()
     assert "skip: author dependabot[bot] is a bot" in actions_env[0].read_text()
 
@@ -191,7 +211,6 @@ def test_main_fails_safe_on_api_error(actions_env, monkeypatch, capsys):
     def boom(*a):
         raise urllib.error.URLError("network down")
 
-    monkeypatch.setattr(gate, "has_security_comment", lambda *a: False)
     monkeypatch.setattr(gate, "fetch_pr_files", boom)
     assert gate.main() == 0
     out = actions_env[0].read_text()
@@ -203,7 +222,6 @@ def test_warning_message_is_escaped(actions_env, monkeypatch, capsys):
     def boom(*a):
         raise urllib.error.URLError("bad url https://x/%0A::error::injected\nline")
 
-    monkeypatch.setattr(gate, "has_security_comment", lambda *a: False)
     monkeypatch.setattr(gate, "fetch_pr_files", boom)
     gate.main()
     warning = [l for l in capsys.readouterr().out.splitlines() if l.startswith("::warning")]
@@ -212,7 +230,6 @@ def test_warning_message_is_escaped(actions_env, monkeypatch, capsys):
 
 
 def test_main_does_not_warn_on_normal_skip(actions_env, monkeypatch, capsys):
-    monkeypatch.setattr(gate, "has_security_comment", lambda *a: False)
     monkeypatch.setattr(gate, "fetch_pr_files", lambda *a: [f("README.md")])
     gate.main()
     assert "::warning" not in capsys.readouterr().out
@@ -242,7 +259,7 @@ def test_fetch_pr_files_paginates(monkeypatch):
     assert len(files) == 101
 
 
-# --- too big / already reviewed ------------------------------------------------
+# --- too big ------------------------------------------------
 
 def _write_event(e):
     Path(gate.os.environ["GITHUB_EVENT_PATH"]).write_text(json.dumps(e))
@@ -255,7 +272,7 @@ class FakeGitHub:
         self.pages = pages  # path -> list of items
         self.posts = []
 
-    def __call__(self, url, token, data=None):
+    def __call__(self, url, token, data=None, method=None):
         path = url.split("api.github.com", 1)[1].split("?", 1)[0]
         if data is not None:
             self.posts.append((path, data))
@@ -289,15 +306,67 @@ def test_exactly_max_files_is_not_too_big():
     assert gate.too_big(event(changed_files=100)["pull_request"], POLICY) is False
 
 
-def test_skips_when_already_reviewed(actions_env, monkeypatch):
-    comments = [{"user": {"type": "Bot"}, "body": "\U0001F916 **Security Issue: SQL injection**"}]
-    github = FakeGitHub({"/repos/mozilla/example-service/pulls/42/comments": comments})
-    monkeypatch.setattr(gate, "_request", github)
+# --- rescan label ----------------------------------------------------------------
+
+def labeled_event(label, **pr_overrides):
+    e = event(**pr_overrides)
+    e["action"] = "labeled"
+    e["label"] = {"name": label}
+    return e
+
+
+def test_unrelated_label_is_skipped_without_api_calls(actions_env, monkeypatch):
+    _write_event(labeled_event("bug"))
+
+    def must_not_call(*a, **kw):
+        raise AssertionError("API called for an unrelated label")
+
+    monkeypatch.setattr(gate, "_request", must_not_call)
     gate.main()
-    assert "skip: an earlier review already posted security comments" in actions_env[0].read_text()
+    assert "skip: label bug is not the rescan label" in actions_env[0].read_text()
 
 
-def test_human_comment_with_marker_does_not_count(monkeypatch):
-    comments = [{"user": {"type": "User"}, "body": "\U0001F916 **Security Issue: fake"}]
-    monkeypatch.setattr(gate, "_request", FakeGitHub({"/repos/o/r/pulls/1/comments": comments}))
-    assert gate.has_security_comment("https://api.github.com", "o/r", 1, "t") is False
+def test_rescan_label_runs_gate_and_is_removed(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    calls = []
+
+    def fake(url, token, data=None, method=None):
+        path = url.split("api.github.com", 1)[1].split("?", 1)[0]
+        calls.append((method, path))
+        return json.dumps([f("app.py")] if path.endswith("/files") else []).encode()
+
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "scan=true" in actions_env[0].read_text()
+    assert ("DELETE", "/repos/mozilla/example-service/issues/42/labels/ai-review") in calls
+
+
+def test_rescan_label_does_not_override_file_rules(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+
+    def fake(url, token, data=None, method=None):
+        return json.dumps([f("README.md")] if url.split("?")[0].endswith("/files") else []).encode()
+
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "scan=false" in actions_env[0].read_text()
+    assert "documentation or test" in actions_env[0].read_text()
+
+
+def test_label_removal_failure_does_not_block_scan(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+
+    def fake(url, token, data=None, method=None):
+        if method == "DELETE":
+            raise urllib.error.URLError("404")
+        return json.dumps([f("app.py")] if url.split("?")[0].endswith("/files") else []).encode()
+
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "scan=true" in actions_env[0].read_text()
+
+
+def test_is_rescan_label_ignores_other_actions():
+    e = event()
+    e["label"] = {"name": "ai-review"}
+    assert gate.is_rescan_label(e, POLICY) is False

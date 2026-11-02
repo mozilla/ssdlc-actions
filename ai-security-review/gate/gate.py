@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Decide whether a pull request should get an AI security review.
 
-Reads the pull_request event payload, the PR's changed files and review
-comments (GitHub API), then applies the central policy in ../policy/default.yml.
+Reads the pull_request event payload and the PR's changed files (GitHub API),
+then applies the central policy in ../policy/default.yml. The caller runs the
+gate when a PR is opened, reopened or marked ready, and again when the
+`rescan_label` is added; the gate removes that label so it can be re-applied.
 A PR with too many files is not scanned; the gate posts a one-time comment
 asking for a separate review instead.
 
@@ -15,6 +17,7 @@ is visible on the PR's checks.
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path, PurePosixPath
 
@@ -22,10 +25,8 @@ import yaml
 
 DEFAULT_POLICY = Path(__file__).resolve().parent.parent / "policy" / "default.yml"
 MAX_PAGES = 30  # of 100 items; GitHub caps the PR files API at 3000 files
-MAX_EVIDENCE = 3
+MAX_EVIDENCE = 3 # How many file names the gate puts in its reason string
 
-# Marker of the inline comments posted by mozilla/claude-code-security-review.
-SECURITY_COMMENT_MARKER = "\U0001F916 **Security Issue:"
 # Hidden marker identifying the gate's own "too big" PR comment.
 TOO_BIG_MARKER = "<!-- ai-security-review:too-big -->"
 
@@ -63,6 +64,13 @@ def _evidence(paths):
     return shown
 
 
+def is_rescan_label(event, policy):
+    """True for a `labeled` event that added the policy's rescan label."""
+    label = policy.get("rescan_label")
+    return bool(label) and event.get("action") == "labeled" \
+        and (event.get("label") or {}).get("name") == label
+
+
 def check_payload(event_name, event, policy):
     """Decisions that need only the event payload. Returns (scan, reason) or None."""
     if event_name != "pull_request":
@@ -71,10 +79,19 @@ def check_payload(event_name, event, policy):
     pr = event["pull_request"]
     skip = policy.get("skip", {})
 
+    # Any other label added to the PR also starts the workflow; ignore it.
+    if event.get("action") == "labeled" and not is_rescan_label(event, policy):
+        label = (event.get("label") or {}).get("name")
+        return False, f"skip: label {label} is not the rescan label"
+
     head_repo = (pr.get("head") or {}).get("repo") or {}
     base_repo = (pr.get("base") or {}).get("repo") or {}
     if not head_repo or head_repo.get("full_name") != base_repo.get("full_name"):
         return False, "skip: pull request comes from a fork"
+
+    opt_out = skip.get("opt_out_label")
+    if opt_out and any(l.get("name") == opt_out for l in pr.get("labels") or []):
+        return False, f"skip: pull request has the {opt_out} label"
 
     user = pr.get("user") or {}
     if skip.get("bot_authors", True) and user.get("type") == "Bot":
@@ -118,9 +135,9 @@ def check_files(pr, files, policy):
 
 # --- GitHub API --------------------------------------------------------------
 
-def _request(url, token, data=None):
+def _request(url, token, data=None, method=None):
     body = json.dumps(data).encode() if data is not None else None
-    req = urllib.request.Request(url, data=body, headers={
+    req = urllib.request.Request(url, data=body, method=method, headers={
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}",
@@ -145,13 +162,13 @@ def fetch_pr_files(api, repo, number, token):
     return _paginate(f"{api}/repos/{repo}/pulls/{number}/files", token)
 
 
-def has_security_comment(api, repo, number, token):
-    """True if an earlier review already posted inline security findings."""
-    comments = _paginate(f"{api}/repos/{repo}/pulls/{number}/comments", token)
-    return any(
-        (c.get("user") or {}).get("type") == "Bot" and SECURITY_COMMENT_MARKER in (c.get("body") or "")
-        for c in comments
-    )
+def remove_label(api, repo, number, label, token):
+    """Remove the rescan label so it can be applied again. Best effort."""
+    url = f"{api}/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
+    try:
+        _request(url, token, method="DELETE")
+    except Exception as e:  # the label may already be gone; never block the scan
+        print(f"::warning title=Could not remove rescan label::{_command_data(e)}")
 
 
 def comment_too_big(api, repo, pr, max_files, token):
@@ -213,11 +230,11 @@ def main():
             pr = event["pull_request"]
             repo = pr["base"]["repo"]["full_name"]
             max_files = int(policy["max_changed_files"])
+            if is_rescan_label(event, policy):
+                remove_label(api, repo, pr["number"], policy["rescan_label"], token)
             if too_big(pr, policy):
                 comment_too_big(api, repo, pr, max_files, token)
                 decision = False, f"skip: too big ({pr['changed_files']} files changed, limit {max_files})"
-            #elif has_security_comment(api, repo, pr["number"], token):
-            #    decision = False, "skip: an earlier review already posted security comments"
             else:
                 files = fetch_pr_files(api, repo, pr["number"], token)
                 decision = check_files(pr, files, policy)
