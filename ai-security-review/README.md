@@ -15,6 +15,34 @@ caller workflow (in your repo)
 2. Create two labels in the repository: `ai-review` (requests a new review) and `skip-ai-review` (opts a PR out). For example: `gh label create ai-review --color 0E8A16 --description "Request an AI security review"` and `gh label create skip-ai-review --color D93F0B --description "Skip the AI security review"`.
 3. Copy [`workflow-templates/ai-security-review.yml`](../workflow-templates/ai-security-review.yml) to `.github/workflows/` in your repository.
 
+## How it works
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Repo as Scanned repo<br/>(caller workflow)
+    participant SSDLC as mozilla/ssdlc-actions<br/>(reusable workflow + gate)
+    participant GH as GitHub<br/>(API + OIDC)
+    participant Fork as mozilla/claude-code-security-review<br/>(fork of the review action)
+    participant Anthropic as Anthropic API
+
+    Repo->>SSDLC: PR opened, or ai-review label added
+    SSDLC->>GH: List changed files and labels
+    GH-->>SSDLC: Files and labels
+    Note over SSDLC: Gate applies the policy rules: scan or skip
+    SSDLC->>GH: Request OIDC token (audience: Anthropic)
+    GH-->>SSDLC: Signed GitHub token
+    SSDLC->>Fork: Run the action on the PR head
+    Fork->>Anthropic: Exchange GitHub token (Workload Identity Federation)
+    Anthropic-->>Fork: Short-lived Anthropic token
+    Fork->>Anthropic: Review the diff, filter false positives
+    Anthropic-->>Fork: Findings
+    Fork->>GH: Post inline review comments on the PR
+    GH-->>Repo: Findings appear as review comments on the PR
+```
+
+The workflow never fails the PR because of findings. Every skip is written to the job summary. The detailed rules are in the next section.
+
 ## When does a review run?
 
 A review runs when a PR is opened, reopened or marked ready for review. Pushing more commits does **not** start another one. To request a new review, add the `ai-review` label to the PR. The gate removes the label so it can be applied again. The label only re-runs the gate, so the rules below still apply. This requires the `ai-review` label to be created in each repository. Any other label is ignored.
