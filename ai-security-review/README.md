@@ -12,7 +12,8 @@ caller workflow (in your repo)
 ## Using it (POC)
 
 1. Define the Actions variables `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID` and `ANTHROPIC_WORKSPACE_ID` (repository or organization level). No secret is needed. For the PoC, these variables are to be added in the target repos, but we should add non-sensitive variables at the organization level later on.
-2. Copy [`workflow-templates/ai-security-review.yml`](../workflow-templates/ai-security-review.yml) to `.github/workflows/` in your repository.
+2. Create two labels in the repository: `ai-review` (requests a new review) and `skip-ai-review` (opts a PR out). For example: `gh label create ai-review --color 0E8A16 --description "Request an AI security review"` and `gh label create skip-ai-review --color D93F0B --description "Skip the AI security review"`.
+3. Copy [`workflow-templates/ai-security-review.yml`](../workflow-templates/ai-security-review.yml) to `.github/workflows/` in your repository.
 
 ## When does a review run?
 

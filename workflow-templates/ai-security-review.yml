@@ -10,6 +10,9 @@ permissions: {}
 
 jobs:
   ai-security-review:
+    # Only the rescan label starts a run; any other label is ignored here (the
+    # gate also checks, so this only avoids a skipped run per label).
+    if: github.event.action != 'labeled' || github.event.label.name == 'ai-review'
     permissions:
       contents: read
       id-token: write # Anthropic Workload Identity Federation (OIDC)

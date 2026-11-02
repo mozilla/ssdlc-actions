@@ -22,9 +22,10 @@ jobs:
     name: Gate
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write # list the PR's files and comments, post the "too big" comment
+      pull-requests: write # list the PR's files and comments, post the "too big" comment, remove the rescan label
     outputs:
       scan: ${{ steps.gate.outputs.scan }}
+      reason: ${{ steps.gate.outputs.reason }}
     steps:
       - name: Decide whether to run an AI scan
         id: gate
@@ -37,8 +38,9 @@ jobs:
     if: needs.gate.outputs.scan == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
-    # One review per PR at a time. A running review always finishes; newer pushes
-    # wait, and only the latest waiting one runs (GitHub keeps one pending job).
+    # One review per PR at a time. A running review always finishes; a rescan
+    # requested meanwhile waits, and only the latest waiting one runs (GitHub
+    # keeps one pending job).
     concurrency:
       group: ai-security-review-${{ github.repository }}-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -47,6 +49,13 @@ jobs:
       id-token: write # request the OIDC token for Anthropic Workload Identity Federation
       pull-requests: write # inline review comments
     steps:
+      - name: Record why the review runs
+        env:
+          REASON: ${{ needs.gate.outputs.reason }}
+        run: |
+          # The reason can contain file names from the PR, so show it as a code span.
+          printf '### Claude security review\n\n`%s`\n' "${REASON//\`/\'}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout pull request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -80,6 +89,7 @@ jobs:
         with:
           claude-model: ${{ inputs.claude-model }}
           comment-pr: "true"
-          # The gate decides when to scan; the action's own once-per-PR cache can
-          # skip new commits (anthropics/claude-code-security-review#120).
+          # The gate and the caller's triggers decide when to scan; the action's own
+          # once-per-PR cache can skip a requested rescan
+          # (anthropics/claude-code-security-review#120).
           run-every-commit: "true"
