@@ -1,10 +1,10 @@
 name: SSDLC AI Security Review
-description: |
-  Reusable workflow running an AI security review on pull requests. A gate
-  first applies the rules in ai-security-review/policy/default.yml and only then runs the
-  Mozilla fork of anthropics/claude-code-security-review, which posts findings
-  as inline PR review comments. The workflow never fails on findings; blocking
-  belongs at the org-ruleset / branch-protection layer, not here.
+
+# Reusable workflow running an AI security review on pull requests. A gate
+# first applies the rules in ai-security-review/policy/default.yml and only then
+# runs the Mozilla fork of anthropics/claude-code-security-review, which posts
+# findings as inline PR review comments. The workflow never fails on findings;
+# blocking belongs at the org-ruleset / branch-protection layer, not here.
 
 on:
   workflow_call:
