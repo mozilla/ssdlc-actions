@@ -11,6 +11,8 @@ caller workflow (in your repo)
 
 ## Using it (POC)
 
+First check the [trust assumptions](#trust-assumptions-where-it-can-be-used): do not onboard a repository where every author of a same-repo pull request is not trusted.
+
 1. Define the Actions variables `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID` and `ANTHROPIC_WORKSPACE_ID` (repository or organization level). No secret is needed. For the PoC, these variables are to be added in the target repos, but we should add non-sensitive variables at the organization level later on.
 2. Create two labels in the repository: `ai-review` (requests a new review) and `skip-ai-review` (opts a PR out). For example: `gh label create ai-review --color 0E8A16 --description "Request an AI security review"` and `gh label create skip-ai-review --color D93F0B --description "Skip the AI security review"`.
 3. Copy [`workflow-templates/ai-security-review.yml`](../workflow-templates/ai-security-review.yml) to `.github/workflows/` in your repository.
@@ -61,6 +63,16 @@ The central rules live in [`policy/default.yml`](policy/default.yml). They are a
 5. Otherwise **reviewed**.
 
 The job summary always says which rule matched, or why the review was skipped. Repositories can't change these rules. If the gate itself fails (for example, a GitHub API error), the review is skipped and a warning annotation appears on the PR's checks.
+
+## Trust assumptions: where this GH workflow can be used
+
+**Every author who can open a same-repo pull request must be trusted with the review's credentials.** Only use this workflow in repositories where that is true.
+
+Do **not** onboard a repository if any of these apply:
+
+- Contributors with write access are not all trusted, for example a public repository with outside collaborators, or access granted to contractors or external teams.
+- Pull requests from untrusted sources are pushed to branches in the repository itself, rather than coming from forks.
+- The repository holds data or access that the review's `GITHUB_TOKEN` or the Anthropic workspace should not expose to its contributors.
 
 ## Development
 
