@@ -1,0 +1,38 @@
+name: AI Security Review Gate
+description: |
+  Decides whether a pull request should get an AI security review, based on
+  the central rules in ai-security-review/policy/default.yml. Never fails the job.
+
+inputs:
+  github-token:
+    description: Token used to list the PR's changed files.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  scan:
+    description: "'true' if the review should run, otherwise 'false'."
+    value: ${{ steps.gate.outputs.scan }}
+  reason:
+    description: The rule that matched, or why the review was skipped.
+    value: ${{ steps.gate.outputs.reason }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.13"
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --no-cache-dir pyyaml
+
+    - name: Evaluate rules
+      id: gate
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GATE_DIR: ${{ github.action_path }}
+      run: python "$GATE_DIR/gate.py"
