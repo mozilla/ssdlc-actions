@@ -45,7 +45,7 @@ The workflow never fails the PR because of findings. Every skip is written to th
 
 ## When does a review run?
 
-A review runs when a PR is opened, reopened or marked ready for review. Pushing more commits does **not** start another one. To request a new review, add the `ai-review` label to the PR. The gate removes the label so it can be applied again. The label only re-runs the gate, so the rules below still apply. This requires the `ai-review` label to be created in each repository. Any other label is ignored.
+A review runs when a PR is opened, reopened or marked ready for review. Pushing more commits does **not** start another one. To request a new review, add the `ai-review` label to the PR. The gate removes the label so it can be applied again, and deletes the earlier inline findings when a new review will run. The label only re-runs the gate, so the rules below still apply. This requires the `ai-review` label to be created in each repository. Any other label is ignored.
 
 The central rules live in [`policy/default.yml`](policy/default.yml). They are applied in this order:
 
@@ -73,5 +73,5 @@ python -m pytest ai-security-review/gate
 
 ## Known limitations (POC)
 
-- **A rescan may post no new comments.** `mozilla/claude-code-security-review` skips posting when the PR already has security comments. Resolve or delete the earlier comments before adding the `ai-review` label.
+- **A rescan deletes the earlier findings.** `mozilla/claude-code-security-review` skips posting when the PR has any of its security comments, even resolved ones. So when a rescan will run, the gate first deletes the bot's earlier inline findings, and any replies on them are lost. The deletion happens before the review runs, so if the review then fails, the PR is left without findings and the failed review job is the only sign.
 - **Code merged without a PR isn't reviewed.** Neither are PRs from forks.

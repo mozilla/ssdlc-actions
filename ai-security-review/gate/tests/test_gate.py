@@ -370,3 +370,133 @@ def test_is_rescan_label_ignores_other_actions():
     e = event()
     e["label"] = {"name": "ai-review"}
     assert gate.is_rescan_label(e, POLICY) is False
+
+
+# --- deleting old findings on rescan -------------------------------------------------
+
+FINDING = {"id": 7, "user": {"type": "Bot"}, "body": "\U0001F916 **Security Issue: SQL injection**"}
+
+
+def _rescan_github(files, comments, delete_error=None):
+    calls = []
+
+    def fake(url, token, data=None, method=None):
+        path = url.split("api.github.com", 1)[1].split("?", 1)[0]
+        calls.append((method, path))
+        if method == "DELETE" and "/pulls/comments/" in path and delete_error:
+            raise delete_error
+        if path.endswith("/files"):
+            return json.dumps(files).encode()
+        if path.endswith("/pulls/42/comments"):
+            return json.dumps(comments).encode()
+        return b"[]"
+
+    return fake, calls
+
+
+def test_rescan_deletes_only_bot_security_findings(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    other = [
+        {"id": 8, "user": {"type": "User"}, "body": "\U0001F916 **Security Issue: fake"},
+        {"id": 9, "user": {"type": "Bot"}, "body": "some other bot comment"},
+    ]
+    fake, calls = _rescan_github([f("app.py")], [FINDING] + other)
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    deletes = [p for m, p in calls if m == "DELETE" and "/pulls/comments/" in p]
+    assert deletes == ["/repos/mozilla/example-service/pulls/comments/7"]
+    assert "(deleted 1 earlier findings)" in actions_env[0].read_text()
+
+
+def test_no_deletion_when_rescan_is_skipped(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    fake, calls = _rescan_github([f("README.md")], [FINDING])
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "scan=false" in actions_env[0].read_text()
+    assert not [1 for m, p in calls if m == "DELETE" and "/pulls/comments/" in p]
+
+
+def test_no_deletion_on_opened_event(actions_env, monkeypatch):
+    fake, calls = _rescan_github([f("app.py")], [FINDING])
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "scan=true" in actions_env[0].read_text()
+    assert not [1 for m, p in calls if m == "DELETE"]
+
+
+def test_delete_failure_does_not_block_scan(actions_env, monkeypatch, capsys):
+    _write_event(labeled_event("ai-review"))
+    fake, _ = _rescan_github([f("app.py")], [FINDING], delete_error=urllib.error.URLError("403"))
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "scan=true" in actions_env[0].read_text()
+    assert "::warning title=Could not delete an old finding" in capsys.readouterr().out
+
+
+def test_delete_failure_is_reported_in_reason(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    fake, _ = _rescan_github([f("app.py")], [FINDING], delete_error=urllib.error.URLError("403"))
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "deleted 0 of 1 earlier findings, 1 failed" in actions_env[0].read_text()
+
+
+def test_list_failure_does_not_block_scan_and_is_reported(actions_env, monkeypatch, capsys):
+    _write_event(labeled_event("ai-review"))
+
+    def fake(url, token, data=None, method=None):
+        path = url.split("api.github.com", 1)[1].split("?", 1)[0]
+        if path.endswith("/pulls/42/comments"):
+            raise urllib.error.URLError("500")
+        return json.dumps([f("app.py")] if path.endswith("/files") else []).encode()
+
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    out = actions_env[0].read_text()
+    assert "scan=true" in out and "could not list earlier findings" in out
+    assert "::warning title=Could not list old findings" in capsys.readouterr().out
+
+
+def test_rescan_with_no_earlier_findings(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    fake, calls = _rescan_github([f("app.py")], [])
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert "no earlier findings to delete" in actions_env[0].read_text()
+
+
+def test_old_findings_are_found_across_pages(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    filler = [{"id": i, "user": {"type": "User"}, "body": "x"} for i in range(100)]
+    pages = {1: filler, 2: [FINDING]}
+    deleted = []
+
+    def fake(url, token, data=None, method=None):
+        path = url.split("api.github.com", 1)[1].split("?", 1)[0]
+        if method == "DELETE" and "/pulls/comments/" in path:
+            deleted.append(path)
+            return b"{}"
+        if path.endswith("/files"):
+            return json.dumps([f("app.py")]).encode()
+        if path.endswith("/pulls/42/comments"):
+            return json.dumps(pages[int(url.rsplit("page=", 1)[1])]).encode()
+        return b"[]"
+
+    monkeypatch.setattr(gate, "_request", fake)
+    gate.main()
+    assert deleted == ["/repos/mozilla/example-service/pulls/comments/7"]
+
+
+def test_label_removal_failure_still_deletes_old_findings(actions_env, monkeypatch):
+    _write_event(labeled_event("ai-review"))
+    fake, calls = _rescan_github([f("app.py")], [FINDING])
+
+    def wrapper(url, token, data=None, method=None):
+        if method == "DELETE" and "/labels/" in url:
+            raise urllib.error.URLError("404")
+        return fake(url, token, data, method)
+
+    monkeypatch.setattr(gate, "_request", wrapper)
+    gate.main()
+    assert "(deleted 1 earlier findings)" in actions_env[0].read_text()

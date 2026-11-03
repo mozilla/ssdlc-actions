@@ -19,7 +19,9 @@ version: 1
 max_changed_files: 100
 
 # Adding this label to a PR runs the gate (and so the review) again. The file
-# rules below still apply. The gate removes the label so it can be re-applied.
+# rules below still apply. The gate removes the label so it can be re-applied
+# and, when a new review will run, deletes the earlier inline security findings
+# (the review action will not post while any exist, even resolved ones).
 rescan_label: ai-review
 
 skip:

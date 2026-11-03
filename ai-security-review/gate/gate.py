@@ -4,7 +4,8 @@
 Reads the pull_request event payload and the PR's changed files (GitHub API),
 then applies the central policy in ../policy/default.yml. The caller runs the
 gate when a PR is opened, reopened or marked ready, and again when the
-`rescan_label` is added; the gate removes that label so it can be re-applied.
+`rescan_label` is added; the gate removes that label so it can be re-applied
+and, if a new review will run, deletes the earlier inline findings.
 A PR with too many files is not scanned; the gate posts a one-time comment
 asking for a separate review instead.
 
@@ -27,6 +28,10 @@ DEFAULT_POLICY = Path(__file__).resolve().parent.parent / "policy" / "default.ym
 MAX_PAGES = 30  # of 100 items; GitHub caps the PR files API at 3000 files
 MAX_EVIDENCE = 3 # How many file names the gate puts in its reason string
 
+# Marker of the inline comments posted by mozilla/claude-code-security-review
+# (scripts/comment-pr-findings.js, which skips posting when it finds this
+# marker). Keep in sync: if the fork's wording changes, nothing gets deleted.
+SECURITY_COMMENT_MARKER = "\U0001F916 **Security Issue:"
 # Hidden marker identifying the gate's own "too big" PR comment.
 TOO_BIG_MARKER = "<!-- ai-security-review:too-big -->"
 
@@ -171,6 +176,36 @@ def remove_label(api, repo, number, label, token):
         print(f"::warning title=Could not remove rescan label::{_command_data(e)}")
 
 
+def delete_old_findings(api, repo, number, token):
+    """Delete earlier inline security findings so a rescan can post new ones.
+
+    The review action skips posting when the PR already has any of its comments
+    (resolved or not), so a requested rescan would otherwise post nothing.
+    Best effort: failures only emit warnings. Returns a short description for
+    the decision reason.
+    """
+    try:
+        comments = _paginate(f"{api}/repos/{repo}/pulls/{number}/comments", token)
+    except Exception as e:
+        print(f"::warning title=Could not list old findings::{_command_data(e)}")
+        return "could not list earlier findings"
+    old = [c for c in comments
+           if (c.get("user") or {}).get("type") == "Bot"
+           and SECURITY_COMMENT_MARKER in (c.get("body") or "")]
+    failed = 0
+    for c in old:
+        try:
+            _request(f"{api}/repos/{repo}/pulls/comments/{c['id']}", token, method="DELETE")
+        except Exception as e:
+            failed += 1
+            print(f"::warning title=Could not delete an old finding::{_command_data(e)}")
+    if not old:
+        return "no earlier findings to delete"
+    if failed:
+        return f"deleted {len(old) - failed} of {len(old)} earlier findings, {failed} failed"
+    return f"deleted {len(old)} earlier findings"
+
+
 def comment_too_big(api, repo, pr, max_files, token):
     """Post the "too big" PR comment unless it is already there."""
     url = f"{api}/repos/{repo}/issues/{pr['number']}/comments"
@@ -237,7 +272,11 @@ def main():
                 decision = False, f"skip: too big ({pr['changed_files']} files changed, limit {max_files})"
             else:
                 files = fetch_pr_files(api, repo, pr["number"], token)
-                decision = check_files(pr, files, policy)
+                scan, reason = check_files(pr, files, policy)
+                # Only clear old findings when a new review will replace them.
+                if scan and is_rescan_label(event, policy):
+                    reason += f" ({delete_old_findings(api, repo, pr['number'], token)})"
+                decision = scan, reason
         scan, reason = decision
     except Exception as e:  # never block the PR
         scan, reason = False, f"skip: gate error ({type(e).__name__}: {e})"
