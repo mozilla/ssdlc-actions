@@ -65,27 +65,53 @@ jobs:
 
       # Keyless auth: Anthropic Workload Identity Federation. The federation rule
       # trusts this workflow's job_workflow_ref, so the token proves this workflow ran.
-      # The SDK and CLI exchange the GitHub OIDC token for a short-lived Anthropic one.
-      - name: Fetch GitHub OIDC token for Anthropic
+      # Anthropic accepts each GitHub OIDC token only once (`jti_reused` otherwise), and
+      # the review runs several Anthropic clients. So the token is exchanged here, once,
+      # and the review step gets the short-lived Anthropic token (ANTHROPIC_AUTH_TOKEN)
+      # instead of the JWT. No JWT is written to disk. That token cannot be refreshed, and
+      # Anthropic caps its lifetime at twice the remaining life of the JWT (about 10 minutes).
+      - name: Exchange GitHub OIDC token for an Anthropic token
+        id: anthropic-auth
+        env:
+          # These IDs are not sensitive, so they are Actions variables, not secrets:
+          # Anthropic documents them as non-secret, and the federation rule gates access.
+          FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
         run: |
           set -euo pipefail
-          umask 077
           jwt=$(curl -sS --fail -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | jq -r .value)
           echo "::add-mask::$jwt"
-          printf '%s' "$jwt" > "$RUNNER_TEMP/anthropic-oidc-jwt"
+          body=$(jq -n \
+            --arg assertion "$jwt" \
+            --arg rule "$FEDERATION_RULE_ID" \
+            --arg org "$ORGANIZATION_ID" \
+            --arg svac "$SERVICE_ACCOUNT_ID" \
+            --arg ws "$WORKSPACE_ID" \
+            '{grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+              assertion: $assertion, federation_rule_id: $rule,
+              organization_id: $org, service_account_id: $svac}
+             + (if $ws != "" then {workspace_id: $ws} else {} end)')
+          # --fail hides the response body, which is an opaque 401 anyway; the reason is
+          # in the authentication history in the Anthropic Console.
+          response=$(curl -sS --fail https://api.anthropic.com/v1/oauth/token \
+            -H "content-type: application/json" -d "$body")
+          token=$(jq -r '.access_token // empty' <<< "$response")
+          if [ -z "$token" ]; then
+            echo "::error::Anthropic token exchange returned no access_token"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       - name: Claude Code security review
         # Branch ref for testing; pin to a SHA once the POC works.
         uses: mozilla/claude-code-security-review@test-wif # zizmor: ignore[unpinned-uses]
         env:
-          # These IDs are not sensitive, so they are Actions variables, not secrets:
-          # Anthropic documents them as non-secret, and the federation rule gates access.
-          ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-          ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-          ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
-          ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/anthropic-oidc-jwt
+          # Already exchanged above; the federation IDs are deliberately not passed on.
+          ANTHROPIC_AUTH_TOKEN: ${{ steps.anthropic-auth.outputs.token }}
         with:
           claude-model: ${{ inputs.claude-model }}
           comment-pr: "true"

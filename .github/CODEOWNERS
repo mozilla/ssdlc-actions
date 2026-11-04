@@ -1,6 +1,3 @@
 # GitHub workflows and configuration
-/.github/ @nkempuclovis @fkiriakos07 @ashmoz
-# AI security review gate, rules, reusable workflow and caller template
-/ai-security-review/ @nkempuclovis @tibap
-/.github/workflows/ai-security-review.yml @nkempuclovis @tibap
-/workflow-templates/ai-security-review.yml @nkempuclovis @tibap
+/.github/ @nkempuclovis @fkiriakos07 @ashmoz @tibap
+

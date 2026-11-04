@@ -34,16 +34,16 @@ sequenceDiagram
     Note over SSDLC: Gate applies the policy rules: scan or skip
     SSDLC->>GH: Request OIDC token (audience: Anthropic)
     GH-->>SSDLC: Signed GitHub token
-    SSDLC->>Fork: Run the action on the PR head
-    Fork->>Anthropic: Exchange GitHub token (Workload Identity Federation)
-    Anthropic-->>Fork: Short-lived Anthropic token
+    SSDLC->>Anthropic: Exchange GitHub token once (Workload Identity Federation)
+    Anthropic-->>SSDLC: Short-lived Anthropic token
+    SSDLC->>Fork: Run the action on the PR head, with the Anthropic token
     Fork->>Anthropic: Review the diff, filter false positives
     Anthropic-->>Fork: Findings
     Fork->>GH: Post inline review comments on the PR
     GH-->>Repo: Findings appear as review comments on the PR
 ```
 
-The workflow never fails the PR because of findings. Every skip is written to the job summary. The detailed rules are in the next section.
+The GitHub token is exchanged once per job, because Anthropic accepts each one only once. The resulting Anthropic token cannot be refreshed and lasts about 10 minutes at most, so a review that runs longer fails. The workflow never fails the PR because of findings. Every skip is written to the job summary. The detailed rules are in the next section.
 
 ## When does a review run?
 
