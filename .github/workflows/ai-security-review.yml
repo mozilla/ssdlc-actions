@@ -30,7 +30,7 @@ jobs:
       - name: Decide whether to run an AI scan
         id: gate
         # Branch ref for testing; pin to a SHA once the POC works.
-        uses: mozilla/ssdlc-actions/ai-security-review/gate@test-ai-scanning # zizmor: ignore[unpinned-uses]
+        uses: mozilla/ssdlc-actions/ai-security-review/gate@main
 
   review:
     name: Claude security review
@@ -77,7 +77,7 @@ jobs:
 
       - name: Claude Code security review
         # Branch ref for testing; pin to a SHA once the POC works.
-        uses: mozilla/claude-code-security-review@test-wif # zizmor: ignore[unpinned-uses]
+        uses: mozilla/claude-code-security-review@main
         env:
           # These IDs are not sensitive, so they are Actions variables, not secrets:
           # Anthropic documents them as non-secret, and the federation rule gates access.

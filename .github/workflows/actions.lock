@@ -5,8 +5,8 @@ version: 'v0.0.3'
 workflows:
     '.github/workflows/ai-security-review.yml':
         - 'actions/checkout@v7.0.1'
-        - 'mozilla/claude-code-security-review@test-wif'
-        - 'mozilla/ssdlc-actions@test-ai-scanning'
+        - 'mozilla/claude-code-security-review@main'
+        - 'mozilla/ssdlc-actions@main'
     '.github/workflows/code-security-analysis-private-repo.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-python@v7.0.0'
@@ -75,9 +75,9 @@ dependencies:
         commit: 'sha1-9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
         owner_id: 9919
         repo_id: 259445878
-    'mozilla/claude-code-security-review@test-wif':
-        ref: 'test-wif'
-        commit: 'sha1-1003dcd66cdc214c554e8229923d1f7a4bfa85cb'
+    'mozilla/claude-code-security-review@main':
+        ref: 'main'
+        commit: 'sha1-2cef945259bfe23b4d8891473ebb369be6ef4e8b'
         owner_id: 131524
         repo_id: 1426008227
         uses:
@@ -85,9 +85,9 @@ dependencies:
             - 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020'
             - 'actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065'
             - 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
-    'mozilla/ssdlc-actions@test-ai-scanning':
-        ref: 'test-ai-scanning'
-        commit: 'sha1-838591432e264476b97a8ff18549a0e9bdb0dcea'
+    'mozilla/ssdlc-actions@main':
+        ref: 'main'
+        commit: 'sha1-fdf6144ffad34d84dcf205763988e29490801d4d'
         owner_id: 131524
         repo_id: 1176886158
         uses:
