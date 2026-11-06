@@ -18,7 +18,7 @@ workflows:
         - 'zizmorcore/zizmor-action@v0.8.1'
     '.github/workflows/ssdlc-sbom.yml':
         - 'actions/checkout@v7.0.1'
-        - 'anchore/sbom-action@v0.24.2'
+        - 'anchore/sbom-action@v0.24.3'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/zizmor.yml':
@@ -60,9 +60,9 @@ dependencies:
         commit: 'sha1-ea165f8d65b6e75b540449e92b4886f43607fa02'
         owner_id: 44036562
         repo_id: 192625955
-    'anchore/sbom-action@v0.24.2':
-        ref: 'v0.24.2'
-        commit: 'sha1-3ad7283483fc7af8ff2b4ea19663c2d5ca935e26'
+    'anchore/sbom-action@v0.24.3':
+        ref: 'v0.24.3'
+        commit: 'sha1-66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c'
         owner_id: 16208487
         repo_id: 399925381
     'github/codeql-action@9b3254085494b55a0f7c4c2b3d2d52cc712ce370':
