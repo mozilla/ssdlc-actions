@@ -30,7 +30,7 @@ jobs:
       - name: Decide whether to run an AI scan
         id: gate
         # Branch ref for testing; pin to a SHA once the POC works.
-        uses: mozilla/ssdlc-actions/ai-security-review/gate@test-ai-scanning # zizmor: ignore[unpinned-uses]
+        uses: mozilla/ssdlc-actions/ai-security-review/gate@main
 
   review:
     name: Claude security review
@@ -57,7 +57,7 @@ jobs:
           printf '### Claude security review\n\n`%s`\n' "${REASON//\`/\'}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout pull request head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 2
@@ -108,7 +108,7 @@ jobs:
 
       - name: Claude Code security review
         # Branch ref for testing; pin to a SHA once the POC works.
-        uses: mozilla/claude-code-security-review@test-wif # zizmor: ignore[unpinned-uses]
+        uses: mozilla/claude-code-security-review@main
         env:
           # Already exchanged above; the federation IDs are deliberately not passed on.
           ANTHROPIC_AUTH_TOKEN: ${{ steps.anthropic-auth.outputs.token }}
