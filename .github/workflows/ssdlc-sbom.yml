@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
 
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@v0.24.2
+        uses: anchore/sbom-action@v0.24.3
         with:
           format: cyclonedx-json
           artifact-name: ${{ inputs.sbom_name }}.cyclonedx.json
