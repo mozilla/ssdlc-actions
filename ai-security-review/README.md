@@ -61,7 +61,7 @@ First check the [trust assumptions](#trust-assumptions-where-it-can-be-used). On
 
 6. **Pin the `uses:` reference to a full commit SHA.** zizmor fails unpinned references under the usual hash-pinning policy.
 
-The standalone workflow accepts an optional `claude-model` input (default `claude-opus-5-5`) for the review and the false-positive filter. The combined workflow uses that default.
+The standalone workflow accepts an optional `claude-model` input (default `claude-opus-5-5`), which it passes to the review action. The combined workflow uses that default.
 
 ## How it works
 
@@ -106,7 +106,7 @@ The central rules live in [`policy/default.yml`](policy/default.yml). They are a
    - PRs labelled `skip-ai-review` (opt-out; it also wins over the `ai-review` label)
    - PRs by bots (e.g. Dependabot)
 2. **Skipped** if the PR changes more than 100 files. The gate posts a PR comment (once) asking for a separate review, because the review and its comments only cover 100 files.
-3. **Review** if lines were added to a dependency manifest (`package.json`, `requirements*.txt`, `go.mod`, …). This applies even under `docs/` or `tests/`.
+3. **Review** if lines were added to a dependency manifest (`package.json`, `requirements*.txt`, `go.mod`, …). This applies even under `docs/` or `tests/`. This rule only decides that a review runs. The review does not check dependency versions against a vulnerability database (see [Known limitations](#known-limitations)).
 4. **Skipped** if the PR only changes documentation or test files. For renames, both the old and new paths count.
 5. Otherwise **reviewed**.
 
@@ -137,5 +137,7 @@ python -m pytest ai-security-review/gate
 
 - **Findings are advisory and not deterministic.** The review is a model, so a rescan can report different findings or miss one. Use a deterministic check (for example Semgrep) for anything that must block a merge.
 - **A rescan deletes the earlier findings.** `mozilla/claude-code-security-review` skips posting when the PR has any of its security comments, even resolved ones. So when a rescan will run, the gate first deletes the bot's earlier inline findings, and any replies on them are lost. The deletion happens before the review runs, so if the review then fails, the PR is left without findings and the failed review job is the only sign.
+- **It is not a dependency scanner.** The review analyzes the code in the diff. It has no vulnerability database and no logic for package versions, so it is not expected to flag vulnerable or outdated dependencies. Use a dedicated dependency scanner (for example Dependabot alerts, dependency review or OSV-Scanner) for that.
+- **Some categories are never reported.** The review action excludes denial of service, rate limiting and resource exhaustion findings, and drops findings in Markdown files.
 - **Code merged without a PR is not reviewed.** Neither are PRs from forks.
 - **The public-repository workflow does not include the AI review.**
