@@ -93,5 +93,5 @@ jobs:
       contents: read
       id-token: write # Anthropic Workload Identity Federation (OIDC)
       pull-requests: write # gate comments and inline review comments
-    # Branch ref for testing; pin to a SHA once the POC works.
-    uses: mozilla/ssdlc-actions/.github/workflows/ai-security-review.yml@main
+    # Pinned to a commit hash of this repo's main branch (zizmor requires hash pins).
+    uses: mozilla/ssdlc-actions/.github/workflows/ai-security-review.yml@e9f3e1160146ff2bad75433503e410d71835de80 # main

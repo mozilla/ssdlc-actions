@@ -10,6 +10,7 @@ workflows:
     '.github/workflows/code-security-analysis-private-repo.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-python@v7.1.0'
+        - 'mozilla/ssdlc-actions@e9f3e1160146ff2bad75433503e410d71835de80'
         - 'zizmorcore/zizmor-action@v0.8.1'
     '.github/workflows/code-security-analysis-public-repo.yml':
         - 'actions/checkout@v7.0.1'
