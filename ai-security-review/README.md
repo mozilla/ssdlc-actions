@@ -33,12 +33,12 @@ First check the [trust assumptions](#trust-assumptions-where-it-can-be-used). On
    | `id-token: write` | the Anthropic Workload Identity Federation token exchange |
    | `pull-requests: write` | the gate (PR files, comments, labels) and the inline review comments |
 
-2. **Trigger on `pull_request`** with the types `opened`, `reopened`, `ready_for_review` and `labeled`. Do not add `synchronize`: the gate does not skip it, so every push would start a new review.
+2. **Trigger on `pull_request`** with the types `opened`, `reopened`, `ready_for_review` and `labeled`. Do not add `synchronize`: the gate does not skip it, so every push would start a new review. In the combined workflow, zizmor and Semgrep run on the same events, so they are not run on every push either.
 3. **Define the Actions variables** `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID` and `ANTHROPIC_WORKSPACE_ID`, at repository or organization level. No secret is needed.
 4. **Create two labels** in the repository: `ai-review` (requests a new review) and `skip-ai-review` (opts a PR out). For example: `gh label create ai-review --color 0E8A16 --description "Request an AI security review"` and `gh label create skip-ai-review --color D93F0B --description "Skip the AI security review"`.
 5. **Add the caller workflow** to `.github/workflows/` in your repository.
-   - Standalone: copy [`workflow-templates/ai-security-review.yml`](../workflow-templates/ai-security-review.yml).
-   - Combined: call the combined workflow, as in this example.
+   - Standalone: copy [`workflow-templates/ai-security-review.yml`](../workflow-templates/ai-security-review.yml), and replace its `uses:` reference with a commit SHA of this repository.
+   - Combined: call the combined workflow, as in this example. The [`workflow-templates/ssdlc-actions-private-repo.yml`](../workflow-templates/ssdlc-actions-private-repo.yml) template does not include the permissions and trigger types above yet, so add them if you start from it.
 
    ```yaml
    on:
