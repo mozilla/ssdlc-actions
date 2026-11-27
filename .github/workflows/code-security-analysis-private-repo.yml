@@ -1,8 +1,8 @@
 name: SSDLC Code Security Analysis
 description: |
   Workflow file for running code security analysis actions on private and
-  internal repos. Runs zizmor (GitHub Actions security) and Semgrep CE
-  (application source security). Findings surface as workflow annotations on
+  internal repos. Runs zizmor (GitHub Actions security), Semgrep CE
+  (application source security) and an AI security review (Claude). Findings surface as workflow annotations on
   the PR diff and in the job log. The job always passes regardless of findings;
   blocking is enforced at the org-ruleset / branch-protection layer, not here.
 
@@ -82,3 +82,16 @@ jobs:
             --metrics=off \
             --disable-version-check \
             . || true
+
+  # Runs in parallel with zizmor and semgrep. There is deliberately no input to
+  # disable it: PR authors opt out with the `skip-ai-review` label and request a
+  # rescan with the `ai-review` label (see ai-security-review/policy/default.yml,
+  # enforced by the reusable workflow's gate). The caller must grant the
+  # permissions the nested jobs request, or the workflow fails to start.
+  ai-security-review:
+    permissions:
+      contents: read
+      id-token: write # Anthropic Workload Identity Federation (OIDC)
+      pull-requests: write # gate comments and inline review comments
+    # Pinned to a commit hash of this repo's main branch (zizmor requires hash pins).
+    uses: mozilla/ssdlc-actions/.github/workflows/ai-security-review.yml@e9f3e1160146ff2bad75433503e410d71835de80 # main
